@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { ApiProblem } from '../contracts'
+import { matchPage } from '../routes'
 
-export const isAdminPage = window.location.pathname.replace(/\/$/, '') === '/admin'
+export const isAdminPage = matchPage(window.location.pathname)?.role === 'admin'
 
 export class RequestError extends Error {
   constructor(readonly status: number, message: string) {

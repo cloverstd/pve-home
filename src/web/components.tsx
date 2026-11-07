@@ -1,5 +1,5 @@
 import { AlertCircle, CircleCheck, LoaderCircle, X } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { MachineStatus, OperationState, Permission } from '../contracts'
 import { errorText } from './api'
 
@@ -66,6 +66,7 @@ export function useMutation(onSuccess: (message: string) => void) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
   const busy = useRef(false)
+  const clearError = useCallback(() => setError(''), [])
   const run = async (request: () => Promise<string>) => {
     if (busy.current) return
     busy.current = true
@@ -80,7 +81,7 @@ export function useMutation(onSuccess: (message: string) => void) {
       setPending(false)
     }
   }
-  return { pending, error, run, clearError: () => setError('') }
+  return { pending, error, run, clearError }
 }
 
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short', hour12: false })

@@ -4,6 +4,8 @@ PVE Home 是部署在 Cloudflare Workers 上的远程管理台。它接入一个
 
 管理员通过 Cloudflare Access 的 GitHub OAuth 登录。普通用户首次用一次性初始化 Token 绑定 Passkey，之后使用 Passkey 登录。Worker 从 D1 读取应用权限，并通过 Workers VPC Service 和 Cloudflare Tunnel 访问 PVE API。
 
+普通用户可直达机器面板 `/` 和操作记录 `/operations`。管理员可直达机器面板 `/admin`、操作记录 `/admin/operations`、用户与权限 `/admin/users` 和审计日志 `/admin/audit`。
+
 ## 开发和测试
 
 需要 Node.js 22.18+。项目锁定 Cloudflare CLI 和支持 `cloudflare.config.ts` 的 Cloudflare Vite 插件 beta 版本。

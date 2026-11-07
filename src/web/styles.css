@@ -40,13 +40,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .brand small { font-size: 11px; color: #a0afc4; margin-top: 3px; letter-spacing: .12em; }
 .nav-label { color: #9aa9bf; font-size: 12px; letter-spacing: .13em; margin: 42px 10px 11px; }
 .sidebar nav { display: flex; flex-direction: column; gap: 5px; }
-.sidebar nav button {
+.sidebar nav a {
   display: flex; align-items: center; text-align: left; gap: 11px;
-  border: 0; padding: 11px 12px; color: #becce0; background: none; border-radius: 8px;
+  padding: 11px 12px; color: #becce0; border-radius: 8px; text-decoration: none;
   font-size: 14px; white-space: nowrap;
 }
-.sidebar nav button:hover { background: #1d2b40; color: white; }
-.sidebar nav button.active { background: #254343; color: #c9f9e7; font-weight: 650; }
+.sidebar nav a:hover { background: #1d2b40; color: white; }
+.sidebar nav a[aria-current='page'] { background: #254343; color: #c9f9e7; font-weight: 650; }
 .sidebar-account {
   margin-top: auto; border-top: 1px solid #304055; padding: 15px 2px 0;
   display: flex; align-items: center; gap: 9px; min-width: 0;
@@ -225,8 +225,8 @@ section:not(.panel) > .empty { border: 1px dashed #bbc9dc; border-radius: 12px; 
   .sidebar .brand small, .nav-label, .sidebar-account .avatar, .account-info span { display: none; }
   .sidebar-account { border: 0; margin: 0; padding: 0; max-width: min(170px, 46vw); }
   .sidebar nav { grid-row: 2; grid-column: 1 / -1; flex-direction: row; overflow-x: auto; padding-bottom: 8px; }
-  .sidebar nav button { padding: 9px; gap: 5px; font-size: 12px; }
-  .sidebar nav button svg { width: 14px; height: 14px; }
+  .sidebar nav a { padding: 9px; gap: 5px; font-size: 12px; }
+  .sidebar nav a svg { width: 14px; height: 14px; }
   .topbar { height: 39px; }
   .content { padding-top: 20px; }
   .page-heading { align-items: flex-start; flex-direction: column; margin-bottom: 17px; }

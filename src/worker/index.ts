@@ -4,6 +4,7 @@ import { getCookie } from 'hono/cookie'
 import { secureHeaders } from 'hono/secure-headers'
 import { z } from 'zod'
 import { actions } from '../contracts'
+import { matchPage } from '../routes'
 import { addUser, changeUser, listAudit, listUsers, resetEnrollment, setGrants } from './admin'
 import { emailSchema, identifyAdmin, identifyUser, sessionCookie, type AppEnv } from './auth'
 import { ApiError, logFailure } from './errors'
@@ -143,14 +144,11 @@ app.post('/api/admin/operations/:id/resolve', async (c) => {
 })
 
 app.all('/api/*', (c) => c.json({ code: 'not_found', message: '接口不存在。' }, 404))
-app.get('/admin', async (c) => {
-  await identifyAdmin(c.req.raw, c.env)
-  c.res = await c.env.ASSETS.fetch(new URL('/', c.req.url))
-  c.header('Cache-Control', 'private, no-store')
-  return c.res
-})
 app.get('*', async (c) => {
-  c.res = await c.env.ASSETS.fetch(c.req.raw)
+  const url = new URL(c.req.url)
+  const route = matchPage(url.pathname)
+  if (route?.role === 'admin') await identifyAdmin(c.req.raw, c.env)
+  c.res = await c.env.ASSETS.fetch(route && route.path !== '/' ? new URL('/', url) : c.req.raw)
   c.header('Cache-Control', 'private, no-store')
   return c.res
 })

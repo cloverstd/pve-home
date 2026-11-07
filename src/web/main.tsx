@@ -1,7 +1,8 @@
 import { Activity, ClipboardList, DatabaseZap, HardDrive, LayoutGrid, LogOut, RefreshCw, ShieldCheck, UsersRound } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { Machine, Operation, PowerAction, Viewer } from '../contracts'
+import { matchPage, pageRoutes } from '../routes'
 import { api, isAdminPage, mutation, useQuery } from './api'
 import { AuditPage, UsersPage } from './admin'
 import { Alert, Loading, useMutation } from './components'
@@ -10,14 +11,12 @@ import { OperationsPage } from './operations'
 import { UserLogin } from './login'
 import './styles.css'
 
-const navigation = [
-  { id: 'machines', title: '机器面板', icon: LayoutGrid, subtitle: '查看和管理虚拟机及容器的电源状态。' },
-  { id: 'operations', title: '操作记录', icon: ClipboardList, subtitle: '跟踪电源操作的进度和结果。' },
-  { id: 'users', title: '用户与权限', icon: UsersRound, subtitle: '添加用户、发放初始化 Token，按机器分配操作权限。' },
-  { id: 'audit', title: '审计日志', icon: ShieldCheck, subtitle: '查看登录、电源操作和管理员变更。' },
-] as const
-
-type Page = typeof navigation[number]['id']
+const navigation = {
+  machines: { title: '机器面板', icon: LayoutGrid, subtitle: '查看和管理虚拟机及容器的电源状态。' },
+  operations: { title: '操作记录', icon: ClipboardList, subtitle: '跟踪电源操作的进度和结果。' },
+  users: { title: '用户与权限', icon: UsersRound, subtitle: '添加用户、发放初始化 Token，按机器分配操作权限。' },
+  audit: { title: '审计日志', icon: ShieldCheck, subtitle: '查看登录、电源操作和管理员变更。' },
+}
 
 function Brand() {
   return <div className="brand">
@@ -43,7 +42,7 @@ function App() {
 }
 
 function Dashboard({ viewer }: { viewer: Viewer }) {
-  const [page, setPage] = useState<Page>('machines')
+  const [pathname, setPathname] = useState(() => window.location.pathname)
   const [revision, setRevision] = useState(0)
   const [notice, setNotice] = useState('')
   const [power, setPower] = useState<{ machine: Machine; action: PowerAction }>()
@@ -57,8 +56,26 @@ function Dashboard({ viewer }: { viewer: Viewer }) {
   const operations = useQuery<{ operations: Operation[] }>('/operations', revision, interval)
   const operationList = operations.data?.operations ?? []
   const hasTasks = operationList.some(({ state }) => state === 'running' || state === 'submitting')
-  const title = navigation.find((item) => item.id === page) ?? navigation[0]
+  const page = matchPage(pathname)?.page ?? 'machines'
+  const title = navigation[page]
 
+  function navigate(event: MouseEvent<HTMLAnchorElement>, path: string) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    if (path === pathname) return
+    window.history.pushState(null, '', path)
+    setPathname(path)
+  }
+
+  useEffect(() => {
+    const updatePathname = () => setPathname(window.location.pathname)
+    window.addEventListener('popstate', updatePathname)
+    return () => window.removeEventListener('popstate', updatePathname)
+  }, [])
+  useEffect(() => {
+    clearError()
+    setPower(undefined)
+  }, [page, clearError])
   useEffect(() => { setFast(hasTasks) }, [hasTasks])
   useEffect(() => {
     if (!notice) return
@@ -72,11 +89,12 @@ function Dashboard({ viewer }: { viewer: Viewer }) {
       <Brand />
       <div className="nav-label">工作台</div>
       <nav aria-label="主导航">
-        {navigation.filter((item) => admin || item.id === 'machines' || item.id === 'operations')
-          .map(({ id, title: label, icon: Icon }) => <button key={id} aria-current={page === id ? 'page' : undefined}
-            className={page === id ? 'active' : ''} onClick={() => { setPage(id); clearError() }}>
+        {pageRoutes.filter(({ role }) => role === viewer.role).map(({ path, page: id }) => {
+          const { title: label, icon: Icon } = navigation[id]
+          return <a key={path} href={path} aria-current={page === id ? 'page' : undefined} onClick={(event) => navigate(event, path)}>
             <Icon size={18} aria-hidden /> {label}
-          </button>)}
+          </a>
+        })}
       </nav>
       <div className="sidebar-account">
         <div className="avatar" aria-hidden>{viewer.email.slice(0, 1).toUpperCase()}</div>
@@ -128,7 +146,7 @@ function Dashboard({ viewer }: { viewer: Viewer }) {
         {admin && page === 'audit' && <AuditPage revision={revision} />}
       </div>
     </main>
-    {power && <PowerDialog {...power} close={() => setPower(undefined)}
+    {page === 'machines' && power && <PowerDialog {...power} close={() => setPower(undefined)}
       done={(message) => { setPower(undefined); done(message) }} />}
   </div>
 }

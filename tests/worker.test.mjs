@@ -57,8 +57,17 @@ test('Access requires a signed application token for the correct issuer and audi
   for (const token of cases) {
     await checked(app.request('/api/admin/me', { token, headers: { 'Cf-Access-Authenticated-User-Email': 'admin@example.test' } }), 401)
   }
-  assert.equal((await app.request('/', { token: null })).status, 200)
-  assert.equal((await app.request('/admin', { token: null })).status, 401)
+  for (const path of ['/', '/operations']) {
+    const response = await app.request(path, { token: null })
+    assert.equal(response.status, 200, path)
+    assert.match(response.headers.get('Content-Type'), /^text\/html/)
+  }
+  for (const path of ['/admin', '/admin/operations', '/admin/users', '/admin/audit/']) {
+    assert.equal((await app.request(path, { token: null })).status, 401, path)
+  }
+  assert.equal((await app.request('/admin/users', { token: await app.jwt(userEmail) })).status, 403)
+  assert.equal((await app.request('/admin/missing')).status, 404)
+  assert.equal((await app.request('/assets/missing.js')).status, 404)
   await checked(app.request('/api/me', { adminRoute: false }), 401)
   const headers = { 'CF-Connecting-IP': '2001:db8::1', 'User-Agent': 'Audit test browser', 'X-Forwarded-For': '192.0.2.1' }
   const [first, second] = await Promise.all([
@@ -80,6 +89,10 @@ test('Access requires a signed application token for the correct issuer and audi
     actorEmail: 'admin@example.test', action: 'login', target: 'Cloudflare Access', result: 'ok',
     ip: '2001:db8::1', userAgent: 'Audit test browser',
   }])
+  const auditPage = await app.request('/admin/audit/')
+  assert.equal(auditPage.status, 200)
+  assert.match(auditPage.headers.get('Content-Type'), /^text\/html/)
+  await checked(app.request('/api/admin/missing'), 404)
 })
 
 test('per-guest grants, task ownership, revocation and user lifecycle', async (t) => {
