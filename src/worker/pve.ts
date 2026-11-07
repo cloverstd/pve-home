@@ -22,6 +22,28 @@ const taskSchema = z.object({
 
 export type Resource = z.infer<typeof resourceSchema>
 
+export const PVE_READ_TIMEOUT_MS = 15_000
+const PVE_WRITE_TIMEOUT_MS = 8_000
+
+const retryableVpcErrors = new Set([
+  'connection_terminated', 'connection_timeout', 'connection_read_timeout',
+  'dns_error', 'dns_timeout', 'http_response_incomplete', 'proxy_internal_error',
+])
+const knownVpcErrors = new Set([
+  ...retryableVpcErrors,
+  'connection_refused', 'connection_limit_reached', 'connection_write_timeout',
+  'destination_unavailable', 'destination_ip_unroutable', 'proxy_loop_detected',
+  'tls_protocol_error', 'tls_certificate_error', 'http_request_error',
+  'http_request_denied', 'http_protocol_error', 'rate_limited',
+])
+
+function vpcErrorCode(error: unknown) {
+  if (!(error instanceof Error)) return null
+  if (error.name === 'TimeoutError') return 'connection_read_timeout'
+  const code = /ProxyError:\s*([a-z_]+)/.exec(error.message)?.[1]
+  return code && knownVpcErrors.has(code) ? code : null
+}
+
 export function resourceKey(kind: string, vmid: number) {
   return kind + ':' + vmid
 }
@@ -79,8 +101,9 @@ export class PveClient {
 
   private async request(path: string, params?: URLSearchParams): Promise<unknown> {
     const origin = URL.parse(this.env.PVE_ORIGIN)
+    const binding = this.env.PVE
     if (!origin || origin.protocol !== 'https:' || origin.username || origin.password ||
-        origin.pathname !== '/' || origin.search || origin.hash || !this.env.PVE_API_TOKEN || !this.env.PVE) {
+        origin.pathname !== '/' || origin.search || origin.hash || !this.env.PVE_API_TOKEN || !binding) {
       throw new PveError('pve_not_configured', 'PVE 连接尚未配置。', false, 503)
     }
 
@@ -96,19 +119,28 @@ export class PveClient {
     })
     if (write) headers.set('Content-Type', 'application/x-www-form-urlencoded')
 
-    const signal = AbortSignal.timeout(8000)
+    const signal = AbortSignal.timeout(write ? PVE_WRITE_TIMEOUT_MS : PVE_READ_TIMEOUT_MS)
+    const fetchPve = () => binding.fetch(origin.origin + '/api2/json' + path, {
+      method: write ? 'POST' : 'GET',
+      headers,
+      body: params?.toString(),
+      redirect: 'manual',
+      signal,
+    })
     let response: Response
     try {
-      response = await this.env.PVE.fetch(origin.origin + '/api2/json' + path, {
-        method: write ? 'POST' : 'GET',
-        headers,
-        body: params?.toString(),
-        redirect: 'manual',
-        signal,
+      response = await fetchPve().catch((error: unknown) => {
+        const code = vpcErrorCode(error)
+        if (write || signal.aborted || !code || !retryableVpcErrors.has(code)) throw error
+        return fetchPve()
       })
-    } catch {
-      if (signal.aborted) throw new PveError('pve_timeout', 'PVE 请求超时。', write, 504)
-      throw new PveError('pve_unreachable', '无法通过 VPC 连接 PVE。', write, 503)
+    } catch (error) {
+      const code = vpcErrorCode(error)
+      const timedOut = signal.aborted || code === 'connection_read_timeout' || code === 'connection_timeout'
+      console.warn(JSON.stringify({ event: 'pve_vpc_fetch_failed', code: code ?? (timedOut ? 'timeout' : 'unknown'), write }))
+      const detail = code ? '（' + code + '）' : ''
+      if (timedOut) throw new PveError('pve_timeout', 'PVE 请求超时' + detail + '。', write, 504)
+      throw new PveError('pve_unreachable', '无法通过 VPC 连接 PVE' + detail + '。', write, 503)
     }
 
     if (!response.ok) {

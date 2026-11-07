@@ -2,11 +2,11 @@ import type { Operation, PowerAction } from '../contracts'
 import type { Identity } from './auth'
 import { ApiError, logFailure } from './errors'
 import { permissions, requireMachine } from './machines'
-import { PveClient, PveError } from './pve'
+import { PVE_READ_TIMEOUT_MS, PveClient, PveError } from './pve'
 
 const SUBMISSION_DEADLINE = 30_000
 const POLL_INTERVAL = 2_000
-const POLL_LEASE = 12_000
+const POLL_LEASE = PVE_READ_TIMEOUT_MS + 5_000
 const TASK_UNREACHABLE_DEADLINE = 15 * 60_000
 
 interface OperationRow extends Operation {

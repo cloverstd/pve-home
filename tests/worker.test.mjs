@@ -240,3 +240,34 @@ test('PVE connection checks accept a pasted Authorization header and distinguish
   app.state.inventoryError = 403
   assert.equal((await checked(app.request(path), 502)).code, 'pve_forbidden')
 })
+
+test('transient VPC failures retry reads once and never resend a power command', async (t) => {
+  const { createServer } = await import('vite')
+  const server = await createServer({
+    configFile: false, appType: 'custom',
+    optimizeDeps: { noDiscovery: true },
+    server: { middlewareMode: true, ws: false },
+  })
+  t.after(() => server.close())
+  const { PveClient } = await server.ssrLoadModule('/src/worker/pve.ts')
+  const requests = []
+  const env = {
+    PVE_ORIGIN: 'https://pve.internal.example.test:8006',
+    PVE_API_TOKEN: 'fixture@pve!power=only-a-fixture',
+    PVE: {
+      async fetch(url, options) {
+        requests.push({ url, method: options.method })
+        if (requests.length === 1 || options.method === 'POST') throw new Error('ProxyError: connection_terminated')
+        return Response.json({ data: [] })
+      },
+    },
+  }
+  const pve = new PveClient(env)
+  assert.deepEqual(await pve.resources(), [])
+  assert.deepEqual(requests.map(({ method }) => method), ['GET', 'GET'])
+  await assert.rejects(pve.power({ node: 'pve-a', type: 'qemu', vmid: 101 }, 'start'), {
+    code: 'pve_unreachable',
+    uncertain: true,
+  })
+  assert.deepEqual(requests.map(({ method }) => method), ['GET', 'GET', 'POST'])
+})
