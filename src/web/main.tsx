@@ -2,17 +2,18 @@ import { Activity, ClipboardList, DatabaseZap, HardDrive, LayoutGrid, LogOut, Re
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { Machine, Operation, PowerAction, Viewer } from '../contracts'
-import { api, mutation, useQuery } from './api'
+import { api, isAdminPage, mutation, useQuery } from './api'
 import { AuditPage, UsersPage } from './admin'
 import { Alert, Loading, useMutation } from './components'
 import { MachineList, PowerDialog } from './machines'
 import { OperationsPage } from './operations'
+import { UserLogin } from './login'
 import './styles.css'
 
 const navigation = [
   { id: 'machines', title: '机器面板', icon: LayoutGrid, subtitle: '查看和管理虚拟机及容器的电源状态。' },
   { id: 'operations', title: '操作记录', icon: ClipboardList, subtitle: '跟踪电源操作的进度和结果。' },
-  { id: 'users', title: '用户与权限', icon: UsersRound, subtitle: '添加 Google 账号，按机器分配操作权限。' },
+  { id: 'users', title: '用户与权限', icon: UsersRound, subtitle: '添加用户、发放初始化 Token，按机器分配操作权限。' },
   { id: 'audit', title: '审计日志', icon: ShieldCheck, subtitle: '查看电源操作和管理员变更。' },
 ] as const
 
@@ -26,12 +27,13 @@ function Brand() {
 }
 
 function App() {
-  const { data: viewer, error } = useQuery<Viewer>('/me', 0, 30_000)
+  const [revision, setRevision] = useState(0)
+  const { data: viewer, error } = useQuery<Viewer>('/me', revision, 30_000)
   if (viewer) return <Dashboard viewer={viewer} />
   return <main className="session">
     <div className="session-card">
       <Brand />
-      {error ? <>
+      {error && !isAdminPage ? <UserLogin done={() => setRevision((n) => n + 1)} /> : error ? <>
         <h1>{error.status === 403 ? '账号未获授权' : '无法进入管理台'}</h1>
         <Alert>{error.message}</Alert>
         <a className="button" href="/cdn-cgi/access/logout">切换账号或重新登录</a>
@@ -80,7 +82,12 @@ function Dashboard({ viewer }: { viewer: Viewer }) {
         <div className="avatar" aria-hidden>{viewer.email.slice(0, 1).toUpperCase()}</div>
         <div className="account-info"><strong title={viewer.email}>{viewer.email}</strong>
           <span>{admin ? '全局管理员' : '普通用户'}</span></div>
-        <a className="sign-out" href="/cdn-cgi/access/logout" title="退出登录" aria-label="退出登录"><LogOut size={17} /></a>
+        {admin ? <a className="sign-out" href="/cdn-cgi/access/logout" title="退出登录" aria-label="退出登录"><LogOut size={17} /></a>
+          : <button className="sign-out sign-out-button" title="退出登录" aria-label="退出登录" onClick={() => void run(async () => {
+            await api('/auth/logout', mutation('POST'))
+            window.location.assign('/')
+            return '已退出登录。'
+          })}><LogOut size={17} /></button>}
       </div>
     </aside>
     <main id="main" className="main">

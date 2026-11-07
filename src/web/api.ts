@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { ApiProblem } from '../contracts'
 
+export const isAdminPage = window.location.pathname.replace(/\/$/, '') === '/admin'
+
 export class RequestError extends Error {
   constructor(readonly status: number, message: string) {
     super(message)
@@ -13,7 +15,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body) headers.set('Content-Type', 'application/json')
   let response: Response
   try {
-    response = await fetch('/api' + path, { ...init, headers, redirect: 'error' })
+    const prefix = isAdminPage && !path.startsWith('/admin/') && !path.startsWith('/auth/') ? '/api/admin' : '/api'
+    response = await fetch(prefix + path, { ...init, headers, redirect: 'error' })
   } catch (error) {
     if (init?.signal?.aborted) throw error
     throw new RequestError(0, '请求未完成，请检查连接或重新登录。')

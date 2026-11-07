@@ -236,3 +236,12 @@ section:not(.panel) > .empty { border: 1px dashed #bbc9dc; border-radius: 12px; 
   .user-row .row-actions { margin-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+.sign-out-button { border: 0; background: none; }
+.login-intro { margin: 0 0 12px; }
+.login-primary { width: 100%; }
+.enrollment-form { margin: 14px 0; border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.enrollment-form summary { cursor: pointer; font-size: 13px; font-weight: 650; }
+.enrollment-form .button { margin-top: 8px; }
+.admin-login-link { display: inline-block; color: var(--brand); font-size: 13px; }
+.token-copy { font-family: ui-monospace, monospace; }

@@ -20,6 +20,8 @@
     "pretest:browser": "npm run build"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.1.0",
     "hono": "^4.13.17",
     "jose": "^6.2.15",
     "lucide-react": "^1.70.0",

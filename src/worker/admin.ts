@@ -1,16 +1,18 @@
 import { actions, type AuditEvent, type ManagedUser, type UserGrant } from '../contracts'
 import { permissions } from './machines'
-import type { Identity } from './auth'
+import { newEnrollment, type Identity } from './auth'
 import { ApiError } from './errors'
 
 export async function listUsers(db: D1Database): Promise<ManagedUser[]> {
   const { results } = await db.prepare(`
-    SELECT u.id, u.email, u.enabled, g.machine_id, g.can_start, g.can_shutdown, g.can_force_stop
+    SELECT u.id, u.email, u.enabled, g.machine_id, g.can_start, g.can_shutdown, g.can_force_stop,
+      EXISTS(SELECT 1 FROM passkeys p WHERE p.user_id = u.id) AS registered
     FROM users u LEFT JOIN grants g ON g.user_id = u.id ORDER BY u.email, g.machine_id
   `).all<{
     id: string
     email: string
     enabled: number
+    registered: number
     machine_id: string | null
     can_start: number
     can_shutdown: number
@@ -20,7 +22,7 @@ export async function listUsers(db: D1Database): Promise<ManagedUser[]> {
   for (const row of results) {
     let user = byUser.get(row.id)
     if (!user) {
-      user = { id: row.id, email: row.email, enabled: Boolean(row.enabled), grants: [] }
+      user = { id: row.id, email: row.email, enabled: Boolean(row.enabled), passkeyRegistered: Boolean(row.registered), grants: [] }
       byUser.set(row.id, user)
     }
     if (row.machine_id) user.grants.push({ machineId: row.machine_id, permissions: permissions(row) })
@@ -32,15 +34,22 @@ export async function addUser(db: D1Database, actor: Identity, email: string) {
   if (email === actor.email) throw new ApiError(409, 'admin_email', '该邮箱已是全局管理员。')
   const id = crypto.randomUUID()
   const now = Date.now()
+  const enrollment = await newEnrollment()
   const [inserted] = await db.batch([
-    db.prepare('INSERT OR IGNORE INTO users (id, email, created_at) VALUES (?, ?, ?)').bind(id, email, now),
+    db.prepare(`
+      INSERT OR IGNORE INTO users (id, email, created_at, enrollment_hash, enrollment_expires_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(id, email, now, enrollment.hash, enrollment.expiresAt),
     db.prepare(`
       INSERT INTO audit (at, actor_email, action, target, result)
       SELECT ?, ?, 'add_user', email, 'ok' FROM users WHERE id = ?
     `).bind(now, actor.email, id),
   ])
   if (!inserted.meta.changes) throw new ApiError(409, 'user_exists', '这个邮箱已添加。')
-  return { id, email, enabled: true, grants: [] }
+  return {
+    id, email, enabled: true, passkeyRegistered: false, grants: [],
+    enrollmentToken: enrollment.token, enrollmentExpiresAt: enrollment.expiresAt,
+  }
 }
 
 async function userEmail(db: D1Database, id: string) {
@@ -63,6 +72,24 @@ export async function changeUser(db: D1Database, actor: Identity, id: string, en
     `).bind(Date.now(), actor.email, action, email),
   ])
   if (!result.meta.changes) throw new ApiError(404, 'user_not_found', '找不到该用户。')
+}
+
+export async function resetEnrollment(db: D1Database, actor: Identity, id: string) {
+  const email = await userEmail(db, id)
+  const enrollment = await newEnrollment()
+  const [updated] = await db.batch([
+    db.prepare('UPDATE users SET enrollment_hash = ?, enrollment_expires_at = ? WHERE id = ?')
+      .bind(enrollment.hash, enrollment.expiresAt, id),
+    db.prepare('DELETE FROM passkeys WHERE user_id = ?').bind(id),
+    db.prepare('DELETE FROM user_sessions WHERE user_id = ?').bind(id),
+    db.prepare('DELETE FROM auth_challenges WHERE user_id = ?').bind(id),
+    db.prepare(`
+      INSERT INTO audit (at, actor_email, action, target, result)
+      SELECT ?, ?, 'reset_enrollment', ?, 'ok' FROM users WHERE id = ?
+    `).bind(Date.now(), actor.email, email, id),
+  ])
+  if (!updated.meta.changes) throw new ApiError(404, 'user_not_found', '找不到该用户。')
+  return { enrollmentToken: enrollment.token, enrollmentExpiresAt: enrollment.expiresAt }
 }
 
 export async function setGrants(db: D1Database, actor: Identity, id: string, grants: UserGrant[]) {

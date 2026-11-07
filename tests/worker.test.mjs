@@ -23,9 +23,11 @@ async function inventory(app) {
 }
 
 async function addOperator(app) {
-  return checked(app.request('/api/admin/users', {
+  const user = await checked(app.request('/api/admin/users', {
     method: 'POST', body: { email: '  ' + userEmail.toUpperCase() + '  ' },
   }), 201)
+  await app.activateOperator(user.id)
+  return user
 }
 
 function grant(app, userId, grants) {
@@ -53,11 +55,14 @@ test('Access requires a signed application token for the correct issuer and audi
     await app.jwt('admin@example.test', { exp: Math.floor(Date.now() / 1000) - 1 }),
   ]
   for (const token of cases) {
-    await checked(app.request('/api/me', { token, headers: { 'Cf-Access-Authenticated-User-Email': 'admin@example.test' } }), 401)
+    await checked(app.request('/api/admin/me', { token, headers: { 'Cf-Access-Authenticated-User-Email': 'admin@example.test' } }), 401)
   }
-  assert.equal((await app.request('/', { token: null })).status, 401)
+  assert.equal((await app.request('/', { token: null })).status, 200)
+  assert.equal((await app.request('/admin', { token: null })).status, 401)
+  await checked(app.request('/api/me', { adminRoute: false }), 401)
   assert.equal((await checked(app.request('/api/me'), 200)).role, 'admin')
-  await checked(app.request('/api/me', { token: app.user }), 403)
+  await checked(app.request('/api/admin/me', { token: await app.jwt(userEmail) }), 403)
+  await checked(app.request('/api/me', { token: app.user }), 401)
   await checked(app.request('/api/admin/machines/sync', {
     method: 'POST', body: {}, headers: { Origin: 'https://attacker.example.test' },
   }), 403)
@@ -80,7 +85,7 @@ test('per-guest grants, task ownership, revocation and user lifecycle', async (t
   await checked(app.request('/api/machines/' + container.id, { token: app.user }), 404)
   await checked(power(app, container.id, 'start', { token: app.user }), 404)
   await checked(power(app, vm.id, 'force_stop', { confirmVmid: vm.vmid, token: app.user }), 403)
-  await checked(app.request('/api/admin/users', { token: app.user }), 403)
+  await checked(app.request('/api/admin/users', { token: app.user }), 401)
   const { operationId: adminOperation } = await checked(power(app, vm.id, 'shutdown'), 202)
   await checked(app.request(operationUrl(adminOperation), { token: app.user }), 404)
   app.state.taskStatus = { status: 'stopped', exitstatus: 'ERROR: shutdown timed out' }
@@ -93,7 +98,7 @@ test('per-guest grants, task ownership, revocation and user lifecycle', async (t
   await checked(app.request(operationUrl(operationId), { token: app.user }), 404)
   assert.deepEqual((await checked(app.request('/api/operations', { token: app.user }), 200)).operations, [])
   await checked(app.request('/api/admin/users/' + user.id, { method: 'PATCH', body: { enabled: false } }), 204)
-  await checked(app.request('/api/me', { token: app.user }), 403)
+  await checked(app.request('/api/me', { token: app.user }), 401)
   await checked(app.request('/api/admin/users/' + user.id, { method: 'DELETE', body: {} }), 204)
   assert.equal((await checked(app.request('/api/admin/users'), 200)).users.length, 0)
   const { events } = await checked(app.request('/api/admin/audit'), 200)
@@ -192,7 +197,7 @@ test('upstream errors stay distinguishable from stopped machines, and unknown su
   assert.equal((await checked(app.request(operationUrl(unknown.operationId)), 200)).state, 'unknown')
   await checked(power(app, vm.id, 'shutdown', { token: app.user }), 409)
   const resolve = '/api/admin/operations/' + unknown.operationId + '/resolve'
-  await checked(app.request(resolve, { method: 'POST', body: { note: 'PVE 未收到操作。' }, token: app.user }), 403)
+  await checked(app.request(resolve, { method: 'POST', body: { note: 'PVE 未收到操作。' }, token: app.user }), 401)
   await checked(app.request(resolve, { method: 'POST', body: { note: 'PVE 未收到操作。' } }), 204)
   assert.equal((await checked(app.request(operationUrl(unknown.operationId)), 200)).state, 'resolved')
   assert.equal((await checked(app.request('/api/machines/' + vm.id), 200)).busy, false)
@@ -203,4 +208,24 @@ test('upstream errors stay distinguishable from stopped machines, and unknown su
   app.state.guests.unshift(removed)
   await inventory(app)
   await checked(app.request('/api/machines/' + vm.id, { token: app.user }), 404)
+})
+
+test('invitation rotation rejects old enrollment tokens and revokes ordinary-user sessions', async (t) => {
+  const app = await setup(t)
+  const operator = await addOperator(app)
+  const options = (token) => app.request('/api/auth/enroll/options', {
+    token: null, method: 'POST', body: { token },
+  })
+  const original = await checked(options(operator.enrollmentToken), 200)
+  assert.equal(original.options.user.name, userEmail)
+  const next = await checked(app.request('/api/admin/users/' + operator.id + '/enrollment', {
+    method: 'POST', body: {},
+  }), 200)
+  await checked(options(operator.enrollmentToken), 403)
+  await checked(options(next.enrollmentToken), 200)
+  await checked(app.request('/api/me', { token: app.user }), 401)
+  const stored = await app.db.prepare('SELECT enrollment_hash FROM users WHERE id = ?').bind(operator.id).first()
+  assert.notEqual(stored.enrollment_hash, next.enrollmentToken)
+  await app.db.prepare('UPDATE users SET enrollment_expires_at = 0 WHERE id = ?').bind(operator.id).run()
+  await checked(options(next.enrollmentToken), 403)
 })

@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { createHash, randomBytes } from 'node:crypto'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { convertV4MiniflareOptions, Miniflare } from 'miniflare'
 
@@ -45,6 +46,7 @@ export async function fixture(origin = defaultOrigin) {
       PVE_API_TOKEN: 'fixture@pve!power=only-a-fixture',
     },
     d1Databases: { DB: 'test-db' },
+    ratelimits: { AUTH_RATE_LIMIT: { namespace_id: '1001', simple: { limit: 30, period: 60 } } },
     assets: {
       directory: fileURLToPath(new URL('assets', output)),
       binding: 'ASSETS',
@@ -98,10 +100,18 @@ export async function fixture(origin = defaultOrigin) {
         .sign(options.key ?? privateKey)
     }
     const admin = await jwt(adminEmail)
-    const user = await jwt(userEmail)
-    function request(path, { token = admin, method = 'GET', body, key, headers = {} } = {}) {
+    const user = randomBytes(32).toString('base64url')
+    async function activateOperator(userId) {
+      const hash = createHash('sha256').update(user).digest('base64url')
+      await db.prepare('INSERT INTO user_sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
+        .bind(hash, userId, Date.now() + 3600_000).run()
+    }
+    function request(path, { token = admin, method = 'GET', body, key, headers = {}, adminRoute = token === admin } = {}) {
+      if (adminRoute && /^\/api\/(me|machines|operations)(?:\/|$)/.test(path)) {
+        path = '/api/admin' + path.slice('/api'.length)
+      }
       const requestHeaders = new Headers({
-        ...(token ? { 'Cf-Access-Jwt-Assertion': token } : {}),
+        ...(token === user ? { Cookie: '__Host-pve-session=' + user } : token ? { 'Cf-Access-Jwt-Assertion': token } : {}),
         ...(body !== undefined ? { 'Content-Type': 'application/json', Origin: origin } : {}),
         ...(key ? { 'Idempotency-Key': key } : {}),
         ...headers,
@@ -110,7 +120,7 @@ export async function fixture(origin = defaultOrigin) {
         method, headers: requestHeaders, body: body === undefined ? undefined : JSON.stringify(body),
       })
     }
-    return { mf, db, state, jwt, admin, user, request }
+    return { mf, db, state, jwt, admin, user, request, activateOperator }
   } catch (error) {
     await mf.dispose()
     throw error

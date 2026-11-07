@@ -1,6 +1,6 @@
 import { KeyRound, Plus, ShieldCheck, Trash2, UsersRound } from 'lucide-react'
 import { useState } from 'react'
-import { actions, type AuditEvent, type Machine, type ManagedUser, type Permission } from '../contracts'
+import { actions, type AuditEvent, type Enrollment, type Machine, type ManagedUser, type Permission } from '../contracts'
 import { api, mutation, useQuery } from './api'
 import { Alert, Empty, Loading, Modal, formatTime, permissionLabel, useMutation } from './components'
 
@@ -11,21 +11,23 @@ export function UsersPage({ machines, revision, done }: {
   const [email, setEmail] = useState('')
   const [editing, setEditing] = useState<ManagedUser>()
   const [removing, setRemoving] = useState<ManagedUser>()
+  const [resetting, setResetting] = useState<ManagedUser>()
+  const [invite, setInvite] = useState<Enrollment>()
   const add = useMutation((message) => { setEmail(''); done(message) })
   const toggle = useMutation(done)
 
   return <>
     <section className="panel padded">
       <div className="section-title"><ShieldCheck size={19} /><h2>添加普通用户</h2></div>
-      <p className="muted">使用对方登录时的 Google 邮箱。添加后可分配机器权限。</p>
+      <p className="muted">添加用户后，将一次性初始化 Token 交给对方绑定 Passkey。</p>
       <form className="add-user" onSubmit={(event) => {
         event.preventDefault()
         void add.run(async () => {
-          await api('/admin/users', mutation('POST', { email }))
+          setInvite(await api<Enrollment>('/admin/users', mutation('POST', { email })))
           return '已添加用户。'
         })
       }}>
-        <label className="field"><span>Google 邮箱</span>
+        <label className="field"><span>用户邮箱</span>
           <input type="email" placeholder="user@example.com" value={email} maxLength={254}
             required onChange={(event) => setEmail(event.target.value)} />
         </label>
@@ -45,7 +47,7 @@ export function UsersPage({ machines, revision, done }: {
       {users.data?.users.length === 0 && <Empty icon={<UsersRound size={26} />} title="还没有普通用户"
         text="添加用户后，即可按机器分配权限。" />}
       {users.data?.users.map((user) => <div className="user-row" key={user.id}>
-        <div className="user-name"><strong>{user.email}</strong><span>已分配 {user.grants.length} 台机器</span></div>
+        <div className="user-name"><strong>{user.email}</strong><span>已分配 {user.grants.length} 台机器 · {user.passkeyRegistered ? '已绑定 Passkey' : '未绑定 Passkey'}</span></div>
         <span className={'badge ' + (user.enabled ? 'good' : 'neutral')}><i />{user.enabled ? '已启用' : '已禁用'}</span>
         <div className="row-actions">
           <button className="button small" onClick={() => setEditing(user)}><KeyRound size={14} /> 分配权限</button>
@@ -53,15 +55,57 @@ export function UsersPage({ machines, revision, done }: {
             await api('/admin/users/' + user.id, mutation('PATCH', { enabled: !user.enabled }))
             return user.enabled ? '已禁用用户。' : '已启用用户。'
           })}>{user.enabled ? '禁用' : '启用'}</button>
+          <button className="button small" onClick={() => setResetting(user)}>重发初始化 Token</button>
           <button className="icon-button delete" aria-label={'移除 ' + user.email} onClick={() => setRemoving(user)}><Trash2 size={16} /></button>
         </div>
       </div>)}
     </section>
+    {invite && <EnrollmentDialog invite={invite} close={() => setInvite(undefined)} />}
+    {resetting && <ResetEnrollmentDialog user={resetting} close={() => setResetting(undefined)}
+      done={(nextInvite) => { setResetting(undefined); setInvite(nextInvite); done('已生成新的初始化 Token。') }} />}
     {editing && <GrantsDialog user={editing} machines={machines.filter((machine) => machine.available)}
       close={() => setEditing(undefined)} done={(message) => { setEditing(undefined); done(message) }} />}
     {removing && <RemoveUserDialog user={removing}
       close={() => setRemoving(undefined)} done={(message) => { setRemoving(undefined); done(message) }} />}
   </>
+}
+
+function EnrollmentDialog({ invite, close }: { invite: Enrollment; close: () => void }) {
+  const [copied, setCopied] = useState(false)
+  return <Modal title="一次性初始化 Token" close={close}>
+    <div className="dialog-body">
+      <p>请私下将 Token 交给用户。它只显示一次，使用后立即失效。</p>
+      <p className="muted">有效期至 {formatTime(invite.enrollmentExpiresAt)}</p>
+      <label className="field">初始化 Token
+        <input className="token-copy" readOnly value={invite.enrollmentToken} onFocus={(e) => e.target.select()} />
+      </label>
+    </div>
+    <div className="dialog-footer">
+      <button className="button" onClick={() => {
+        void navigator.clipboard.writeText(invite.enrollmentToken).then(() => setCopied(true)).catch(() => {})
+      }}>{copied ? '已复制' : '复制 Token'}</button>
+      <button className="button primary" onClick={close}>完成</button>
+    </div>
+  </Modal>
+}
+
+function ResetEnrollmentDialog({ user, close, done }: {
+  user: ManagedUser; close: () => void; done: (invite: Enrollment) => void
+}) {
+  const { pending, error, run } = useMutation(() => {})
+  return <Modal title="重发初始化 Token" close={() => { if (!pending) close() }}>
+    <div className="dialog-body">
+      <p><strong>{user.email}</strong> 的现有 Passkey 和登录会话将被撤销。请将新 Token 交给用户重新绑定。</p>
+      {error && <Alert>{error}</Alert>}
+    </div>
+    <div className="dialog-footer">
+      <button className="button" disabled={pending} onClick={close}>取消</button>
+      <button className="button danger" disabled={pending} onClick={() => void run(async () => {
+        done(await api<Enrollment>('/admin/users/' + user.id + '/enrollment', mutation('POST')))
+        return ''
+      })}>确认重发</button>
+    </div>
+  </Modal>
 }
 
 function GrantsDialog({ user, machines, close, done }: {
@@ -140,7 +184,7 @@ function RemoveUserDialog({ user, close, done }: { user: ManagedUser; close: () 
 const auditActions: Record<string, string> = {
   start: '开机', shutdown: '正常关机', force_stop: '强制关机', add_user: '添加用户',
   enable_user: '启用用户', disable_user: '禁用用户', remove_user: '移除用户',
-  set_grants: '更新权限', sync_machines: '同步机器', resolve_operation: '核查操作',
+  reset_enrollment: '重发初始化 Token', set_grants: '更新权限', sync_machines: '同步机器', resolve_operation: '核查操作',
 }
 const auditResults: Record<string, string> = {
   ok: '成功', submitting: '正在提交', running: '执行中', succeeded: '已完成',

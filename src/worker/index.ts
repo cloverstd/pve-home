@@ -1,16 +1,18 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
+import { getCookie } from 'hono/cookie'
 import { secureHeaders } from 'hono/secure-headers'
 import { z } from 'zod'
 import { actions } from '../contracts'
-import { addUser, changeUser, listAudit, listUsers, setGrants } from './admin'
-import { emailSchema, identify, type Identity } from './auth'
+import { addUser, changeUser, listAudit, listUsers, resetEnrollment, setGrants } from './admin'
+import { emailSchema, identifyAdmin, identifyUser, sessionCookie, type AppEnv } from './auth'
 import { ApiError, logFailure } from './errors'
 import { liveMachines, machineRows, requireMachine, syncMachines } from './machines'
 import { getOperation, listOperations, reconcileTasks, resolveOperation, submitPower } from './operations'
 import { PveClient } from './pve'
+import { parseBody, passkeys, purgeExpiredAuth } from './passkeys'
 
-const app = new Hono<{ Bindings: Cloudflare.Env; Variables: { actor: Identity } }>()
+const app = new Hono<AppEnv>({ strict: false })
 const machineId = z.string().regex(/^[a-f0-9]{32}$/)
 const noFields = z.strictObject({})
 const powerSchema = z.strictObject({
@@ -39,7 +41,6 @@ app.use('*', secureHeaders({
 }))
 app.use('*', async (c, next) => {
   c.header('Cache-Control', 'private, no-store')
-  c.set('actor', await identify(c.req.raw, c.env))
   await next()
 })
 
@@ -58,34 +59,43 @@ app.use('/api/*', bodyLimit({
   maxSize: 256 * 1024,
   onError: () => { throw new ApiError(413, 'request_too_large', '请求体过大。') },
 }))
-app.use('/api/admin/*', async (c, next) => {
-  if (c.var.actor.role !== 'admin') throw new ApiError(403, 'admin_required', '需要管理员权限。')
+app.route('/api/auth', passkeys)
+app.use('/api/*', async (c, next) => {
+  const actor = c.req.path.startsWith('/api/admin/')
+    ? await identifyAdmin(c.req.raw, c.env)
+    : await identifyUser(c.env, getCookie(c, sessionCookie))
+  c.set('actor', actor)
   await next()
 })
 
-app.get('/api/me', (c) => c.json({ email: c.var.actor.email, role: c.var.actor.role }))
-app.get('/api/machines', async (c) => {
+const resources = new Hono<AppEnv>()
+resources.get('/me', (c) => c.json({ email: c.var.actor.email, role: c.var.actor.role }))
+resources.get('/machines', async (c) => {
   const rows = await machineRows(c.env.DB, c.var.actor)
   return c.json({ machines: await liveMachines(c.env, c.var.actor, rows) })
 })
-app.get('/api/machines/:id', async (c) => {
+resources.get('/machines/:id', async (c) => {
   const row = await requireMachine(c.env.DB, c.var.actor, c.req.param('id'))
   const [machine] = await liveMachines(c.env, c.var.actor, [row])
   return c.json(machine)
 })
-app.post('/api/machines/:id/actions', async (c) => {
+resources.post('/machines/:id/actions', async (c) => {
   const body = await parseBody(c.req.raw, powerSchema)
   const key = z.uuid().safeParse(c.req.header('Idempotency-Key'))
   if (!key.success) throw new ApiError(400, 'idempotency_key_required', '需要有效的操作编号。')
   const operationId = await submitPower(c.env, c.var.actor, c.req.param('id'), { ...body, key: key.data })
-  c.header('Location', '/api/operations/' + operationId)
+  const prefix = c.var.actor.role === 'admin' ? '/api/admin' : '/api'
+  c.header('Location', prefix + '/operations/' + operationId)
   return c.json({ operationId }, 202)
 })
-app.get('/api/operations', async (c) => c.json({
+resources.get('/operations', async (c) => c.json({
   operations: await listOperations(c.env, c.var.actor),
 }))
-app.get('/api/operations/:id', async (c) =>
+resources.get('/operations/:id', async (c) =>
   c.json(await getOperation(c.env, c.var.actor, c.req.param('id'))))
+
+app.route('/api', resources)
+app.route('/api/admin', resources)
 
 app.get('/api/admin/users', async (c) => c.json({ users: await listUsers(c.env.DB) }))
 app.post('/api/admin/users', async (c) => {
@@ -101,6 +111,10 @@ app.delete('/api/admin/users/:id', async (c) => {
   await parseBody(c.req.raw, noFields)
   await changeUser(c.env.DB, c.var.actor, c.req.param('id'))
   return c.body(null, 204)
+})
+app.post('/api/admin/users/:id/enrollment', async (c) => {
+  await parseBody(c.req.raw, noFields)
+  return c.json(await resetEnrollment(c.env.DB, c.var.actor, c.req.param('id')))
 })
 app.put('/api/admin/users/:id/grants', async (c) => {
   const { grants } = await parseBody(c.req.raw, grantSchema)
@@ -129,9 +143,14 @@ app.post('/api/admin/operations/:id/resolve', async (c) => {
 })
 
 app.all('/api/*', (c) => c.json({ code: 'not_found', message: '接口不存在。' }, 404))
+app.get('/admin', async (c) => {
+  await identifyAdmin(c.req.raw, c.env)
+  c.res = await c.env.ASSETS.fetch(new URL('/', c.req.url))
+  c.header('Cache-Control', 'private, no-store')
+  return c.res
+})
 app.get('*', async (c) => {
-  const response = await c.env.ASSETS.fetch(c.req.raw)
-  c.res = response
+  c.res = await c.env.ASSETS.fetch(c.req.raw)
   c.header('Cache-Control', 'private, no-store')
   return c.res
 })
@@ -146,23 +165,11 @@ app.onError((error, c) => {
   return c.json({ code: 'internal_error', message: '服务暂时无法处理请求。' }, 500)
 })
 
-async function parseBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
-  let data: unknown
-  try {
-    data = await request.json()
-  } catch {
-    throw new ApiError(400, 'invalid_json', '请求不是有效的 JSON。')
-  }
-  const result = schema.safeParse(data)
-  if (!result.success) throw new ApiError(400, 'invalid_input', '请求内容无效，请检查输入。')
-  return result.data
-}
-
 export default {
   fetch: app.fetch,
   async scheduled(_controller, env) {
     try {
-      await reconcileTasks(env)
+      await Promise.all([reconcileTasks(env), purgeExpiredAuth(env.DB)])
     } catch (error) {
       logFailure('task_reconciliation_failed', error)
       throw new Error('Task reconciliation failed')

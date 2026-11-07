@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
       triggers: bootstrap ? [] : [triggers.scheduled({ schedule: '* * * * *' })],
       env: {
         ASSETS: bindings.assets(),
+        AUTH_RATE_LIMIT: bindings.rateLimit({ namespace: '1001', simple: { limit: 30, period: 60 } }),
         DB: bindings.d1({ id: databaseId }),
         // Workers VPC requires a real remote binding. Keep unconfigured local dev offline.
         ...(!bootstrap && (vpcServiceId || mode !== 'development') ? {

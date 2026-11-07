@@ -49,7 +49,13 @@ export interface ManagedUser {
   id: string
   email: string
   enabled: boolean
+  passkeyRegistered: boolean
   grants: UserGrant[]
+}
+
+export interface Enrollment {
+  enrollmentToken: string
+  enrollmentExpiresAt: number
 }
 
 export interface AuditEvent {
