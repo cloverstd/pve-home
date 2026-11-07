@@ -14,7 +14,7 @@ const navigation = [
   { id: 'machines', title: '机器面板', icon: LayoutGrid, subtitle: '查看和管理虚拟机及容器的电源状态。' },
   { id: 'operations', title: '操作记录', icon: ClipboardList, subtitle: '跟踪电源操作的进度和结果。' },
   { id: 'users', title: '用户与权限', icon: UsersRound, subtitle: '添加用户、发放初始化 Token，按机器分配操作权限。' },
-  { id: 'audit', title: '审计日志', icon: ShieldCheck, subtitle: '查看电源操作和管理员变更。' },
+  { id: 'audit', title: '审计日志', icon: ShieldCheck, subtitle: '查看登录、电源操作和管理员变更。' },
 ] as const
 
 type Page = typeof navigation[number]['id']

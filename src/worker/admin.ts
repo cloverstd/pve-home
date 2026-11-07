@@ -122,7 +122,7 @@ export async function setGrants(db: D1Database, actor: Identity, id: string, gra
 
 export async function listAudit(db: D1Database, before: number) {
   const { results } = await db.prepare(`
-    SELECT a.id, a.at, a.actor_email AS actorEmail, a.action, a.result,
+    SELECT a.id, a.at, a.actor_email AS actorEmail, a.action, a.result, a.ip, a.user_agent AS userAgent,
       CASE WHEN m.id IS NULL THEN a.target ELSE m.name || ' · ' || m.vmid END AS target
     FROM audit a LEFT JOIN machines m ON m.id = a.target
     WHERE a.id < ? ORDER BY a.id DESC LIMIT 51

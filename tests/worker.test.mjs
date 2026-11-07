@@ -60,7 +60,13 @@ test('Access requires a signed application token for the correct issuer and audi
   assert.equal((await app.request('/', { token: null })).status, 200)
   assert.equal((await app.request('/admin', { token: null })).status, 401)
   await checked(app.request('/api/me', { adminRoute: false }), 401)
-  assert.equal((await checked(app.request('/api/me'), 200)).role, 'admin')
+  const headers = { 'CF-Connecting-IP': '2001:db8::1', 'User-Agent': 'Audit test browser', 'X-Forwarded-For': '192.0.2.1' }
+  const [first, second] = await Promise.all([
+    checked(app.request('/api/me', { headers }), 200),
+    checked(app.request('/api/me', { headers }), 200),
+  ])
+  assert.equal(first.role, 'admin')
+  assert.equal(second.role, 'admin')
   await checked(app.request('/api/admin/me', { token: await app.jwt(userEmail) }), 403)
   await checked(app.request('/api/me', { token: app.user }), 401)
   await checked(app.request('/api/admin/machines/sync', {
@@ -69,6 +75,11 @@ test('Access requires a signed application token for the correct issuer and audi
   await checked(app.request('/api/admin/machines/sync', {
     method: 'POST', body: {}, headers: { 'Content-Type': 'text/plain' },
   }), 415)
+  const { events } = await checked(app.request('/api/admin/audit'), 200)
+  assert.deepEqual(events.map(({ id, at, ...event }) => event), [{
+    actorEmail: 'admin@example.test', action: 'login', target: 'Cloudflare Access', result: 'ok',
+    ip: '2001:db8::1', userAgent: 'Audit test browser',
+  }])
 })
 
 test('per-guest grants, task ownership, revocation and user lifecycle', async (t) => {
@@ -103,7 +114,7 @@ test('per-guest grants, task ownership, revocation and user lifecycle', async (t
   assert.equal((await checked(app.request('/api/admin/users'), 200)).users.length, 0)
   const { events } = await checked(app.request('/api/admin/audit'), 200)
   for (const action of ['add_user', 'set_grants', 'disable_user', 'remove_user', 'shutdown']) {
-    assert.ok(events.some((event) => event.action === action), action)
+    assert.ok(events.some((event) => event.action === action && event.ip === null && event.userAgent === null), action)
   }
 })
 

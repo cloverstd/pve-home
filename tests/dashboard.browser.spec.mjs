@@ -39,7 +39,10 @@ test('administrator issues a one-time token and operator enrolls, signs in and l
   try {
     app = await fixture(origin)
     const admin = await browser.newContext()
-    const operator = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true })
+    const operator = await browser.newContext({
+      viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true,
+      userAgent: 'Passkey test browser', extraHTTPHeaders: { 'CF-Connecting-IP': '192.0.2.8' },
+    })
     await admin.addCookies([{ url: origin, name: 'fixture_access', value: app.admin, httpOnly: true }])
 
     const consolePage = await admin.newPage()
@@ -79,8 +82,15 @@ test('administrator issues a one-time token and operator enrolls, signs in and l
     })
     expect(replay.status()).toBe(403)
     await userPage.getByRole('button', { name: '退出登录' }).click()
+    const loginResponse = userPage.waitForResponse(origin + '/api/auth/login/verify')
     await userPage.getByRole('button', { name: '使用 Passkey 登录' }).click()
+    const login = await loginResponse
+    expect(login.status()).toBe(204)
     await expect(vm).toBeVisible()
+    const loginReplay = await operator.request.post(origin + '/api/auth/login/verify', {
+      headers: { Origin: origin }, data: login.request().postDataJSON(),
+    })
+    expect(loginReplay.status()).toBe(401)
     await expect(userPage.getByRole('article', { name: 'private-vm' })).toHaveCount(0)
     await expect(userPage.getByRole('button', { name: '用户与权限' })).toHaveCount(0)
     expect(await userPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
@@ -108,6 +118,12 @@ test('administrator issues a one-time token and operator enrolls, signs in and l
     await expect(userPage.getByText('暂无操作记录')).toBeVisible()
     await userPage.getByRole('button', { name: '机器面板' }).click()
     await expect(userPage.getByText('暂无可用机器')).toBeVisible()
+
+    await consolePage.getByRole('button', { name: '审计日志' }).click()
+    const passkeyLogins = consolePage.getByRole('row').filter({ hasText: userEmail }).filter({ hasText: 'Passkey' })
+    await expect(passkeyLogins).toHaveCount(2)
+    await expect(passkeyLogins.getByRole('cell', { name: '192.0.2.8', exact: true })).toHaveCount(2)
+    await expect(passkeyLogins.getByRole('cell', { name: 'Passkey test browser', exact: true })).toHaveCount(2)
   } finally {
     await app?.mf.dispose()
     server.closeAllConnections()

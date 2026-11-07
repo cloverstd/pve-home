@@ -185,6 +185,7 @@ const auditActions: Record<string, string> = {
   start: '开机', shutdown: '正常关机', force_stop: '强制关机', add_user: '添加用户',
   enable_user: '启用用户', disable_user: '禁用用户', remove_user: '移除用户',
   reset_enrollment: '重发初始化 Token', set_grants: '更新权限', sync_machines: '同步机器', resolve_operation: '核查操作',
+  login: '登录',
 }
 const auditResults: Record<string, string> = {
   ok: '成功', submitting: '正在提交', running: '执行中', succeeded: '已完成',
@@ -204,12 +205,13 @@ export function AuditPage({ revision }: { revision: number }) {
   return <section className="panel">
     {error && <Alert>{error.message}</Alert>}
     {!data && !error && <Loading />}
-    {data?.events.length === 0 && <Empty icon={<ShieldCheck size={26} />} title="暂无审计记录" text="电源操作和管理变更将在这里显示。" />}
+    {data?.events.length === 0 && <Empty icon={<ShieldCheck size={26} />} title="暂无审计记录" text="登录、电源操作和管理变更将在这里显示。" />}
     {!!data?.events.length && <div className="table-wrap">
-      <table><thead><tr><th>时间</th><th>操作者</th><th>动作</th><th>目标</th><th>结果</th></tr></thead>
+      <table><thead><tr><th>时间</th><th>操作者</th><th>动作</th><th>目标</th><th>结果</th><th>IP</th><th>User-Agent</th></tr></thead>
         <tbody>{data.events.map((item) => <tr key={item.id}>
           <td>{formatTime(item.at)}</td><td>{item.actorEmail}</td><td>{auditActions[item.action] ?? item.action}</td>
           <td>{item.target}</td><td>{auditResult(item.result)}</td>
+          <td>{item.ip ?? '—'}</td><td><div className="audit-user-agent">{item.userAgent ?? '—'}</div></td>
         </tr>)}</tbody>
       </table>
     </div>}

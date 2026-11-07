@@ -34,6 +34,12 @@ export async function hashSecret(secret: string) {
   return encodeBytes(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret))))
 }
 
+export function loginAuditHeaders(request: Request) {
+  const ip = request.headers.get('CF-Connecting-IP') || null
+  const userAgent = request.headers.get('User-Agent')?.slice(0, 1024) || null
+  return [ip, userAgent] as const
+}
+
 export async function newEnrollment() {
   const token = randomSecret()
   return { token, hash: await hashSecret(token), expiresAt: Date.now() + enrollmentLifetime }
@@ -69,6 +75,13 @@ export async function identifyAdmin(request: Request, env: Cloudflare.Env): Prom
   if (email !== env.ADMIN_EMAIL.trim().toLowerCase()) {
     throw new ApiError(403, 'admin_required', '需要管理员权限。')
   }
+  // Access sends the application token on subsequent requests in the same session.
+  const [ip, userAgent] = loginAuditHeaders(request)
+  await env.DB.prepare(`
+    INSERT INTO audit (at, actor_email, action, target, result, ip, user_agent, access_token_hash)
+    VALUES (?, ?, 'login', 'Cloudflare Access', 'ok', ?, ?, ?)
+    ON CONFLICT(access_token_hash) WHERE access_token_hash IS NOT NULL DO NOTHING
+  `).bind(Date.now(), email, ip, userAgent, await hashSecret(token)).run()
   return { id: 'admin:' + email, email, role: 'admin' }
 }
 

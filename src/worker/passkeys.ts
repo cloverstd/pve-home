@@ -6,7 +6,7 @@ import { Hono, type Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
 import {
-  decodeBytes, encodeBytes, hashSecret, randomSecret, secretSchema,
+  decodeBytes, encodeBytes, hashSecret, loginAuditHeaders, randomSecret, secretSchema,
   sessionCookie, sessionLifetime, type AppEnv,
 } from './auth'
 import { ApiError } from './errors'
@@ -83,12 +83,18 @@ async function beginChallenge(db: D1Database, kind: 'registration' | 'authentica
 async function newSession(c: Context<AppEnv>) {
   const token = randomSecret()
   const hash = await hashSecret(token)
+  const [ip, userAgent] = loginAuditHeaders(c.req.raw)
   return {
     hash,
     insert: (id: string) => c.env.DB.prepare(`
       INSERT INTO user_sessions (token_hash, user_id, expires_at)
       SELECT ?, ?, ? WHERE changes() > 0
     `).bind(hash, id, Date.now() + sessionLifetime * 1000),
+    audit: c.env.DB.prepare(`
+      INSERT INTO audit (at, actor_email, action, target, result, ip, user_agent)
+      SELECT ?, u.email, 'login', 'Passkey', 'ok', ?, ?
+      FROM user_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?
+    `).bind(Date.now(), ip, userAgent, hash),
     set: () => setCookie(c, sessionCookie, token, { ...cookieOptions, maxAge: sessionLifetime }),
   }
 }
@@ -148,6 +154,7 @@ passkeys.post('/enroll/verify', async (c) => {
       DELETE FROM auth_challenges WHERE user_id = ? AND kind = 'registration'
       AND EXISTS (SELECT 1 FROM user_sessions WHERE token_hash = ?)
     `).bind(flow.id, session.hash),
+    session.audit,
   ])
   if (!registered.meta.changes) throw enrollmentError()
   session.set()
@@ -189,6 +196,7 @@ passkeys.post('/login/verify', async (c) => {
     db.prepare(`
       DELETE FROM auth_challenges WHERE id = ? AND EXISTS (SELECT 1 FROM user_sessions WHERE token_hash = ?)
     `).bind(flowId, session.hash),
+    session.audit,
   ])
   if (!authenticated.meta.changes) throw authError()
   session.set()

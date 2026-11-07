@@ -65,6 +65,8 @@ export interface AuditEvent {
   action: string
   target: string
   result: string
+  ip: string | null
+  userAgent: string | null
 }
 
 export interface ApiProblem {
