@@ -229,3 +229,14 @@ test('invitation rotation rejects old enrollment tokens and revokes ordinary-use
   await app.db.prepare('UPDATE users SET enrollment_expires_at = 0 WHERE id = ?').bind(operator.id).run()
   await checked(options(next.enrollmentToken), 403)
 })
+
+test('PVE connection checks accept a pasted Authorization header and distinguish 401 from 403', async (t) => {
+  const app = await fixture(undefined, { pveToken: '  Authorization: PVEAPIToken=fixture@pve!power=only-a-fixture  ' })
+  t.after(() => app.mf.dispose())
+  const path = '/api/admin/connection'
+  assert.equal((await checked(app.request(path), 200)).reachable, true)
+  app.state.inventoryError = 401
+  assert.equal((await checked(app.request(path), 502)).code, 'pve_token_invalid')
+  app.state.inventoryError = 403
+  assert.equal((await checked(app.request(path), 502)).code, 'pve_forbidden')
+})

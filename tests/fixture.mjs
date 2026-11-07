@@ -15,7 +15,7 @@ const migrationsDir = new URL('../migrations/', import.meta.url)
 const migrations = await Promise.all((await readdir(migrationsDir)).filter((name) => name.endsWith('.sql')).sort()
   .map((name) => readFile(new URL(name, migrationsDir), 'utf8')))
 
-export async function fixture(origin = defaultOrigin) {
+export async function fixture(origin = defaultOrigin, { pveToken = 'fixture@pve!power=only-a-fixture' } = {}) {
   const { publicKey, privateKey } = await generateKeyPair('RS256', { extractable: true })
   const jwk = { ...await exportJWK(publicKey), kid: 'fixture-key', alg: 'RS256', use: 'sig' }
   const state = {
@@ -43,7 +43,7 @@ export async function fixture(origin = defaultOrigin) {
       ACCESS_AUD: audience,
       ADMIN_EMAIL: adminEmail,
       PVE_ORIGIN: 'https://pve.internal.example.test:8006',
-      PVE_API_TOKEN: 'fixture@pve!power=only-a-fixture',
+      PVE_API_TOKEN: pveToken,
     },
     d1Databases: { DB: 'test-db' },
     ratelimits: { AUTH_RATE_LIMIT: { namespace_id: '1001', simple: { limit: 30, period: 60 } } },

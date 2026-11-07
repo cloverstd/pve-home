@@ -84,10 +84,15 @@ export class PveClient {
       throw new PveError('pve_not_configured', 'PVE 连接尚未配置。', false, 503)
     }
 
+    const token = this.env.PVE_API_TOKEN.trim().replace(/^(?:Authorization:\s*)?PVEAPIToken\s*=\s*/i, '')
+    if (!/^[^\s!=]+@[^\s@!=]+![^\s!=]+=[^\s=<>]+$/.test(token)) {
+      throw new PveError('pve_token_format', 'PVE_API_TOKEN 格式应为 user@realm!token=secret。', false, 503)
+    }
+
     const write = params !== undefined
     const headers = new Headers({
       Accept: 'application/json',
-      Authorization: 'PVEAPIToken=' + this.env.PVE_API_TOKEN,
+      Authorization: 'PVEAPIToken=' + token,
     })
     if (write) headers.set('Content-Type', 'application/x-www-form-urlencoded')
 
@@ -108,8 +113,11 @@ export class PveClient {
 
     if (!response.ok) {
       await response.body?.cancel().catch(() => {})
-      if (response.status === 401 || response.status === 403) {
-        throw new PveError('pve_forbidden', 'PVE 拒绝访问，请检查 API Token 和权限。')
+      if (response.status === 401) {
+        throw new PveError('pve_token_invalid', 'PVE 未接受 API Token（HTTP 401）。请核对 Token ID、最新密钥及有效期。')
+      }
+      if (response.status === 403) {
+        throw new PveError('pve_forbidden', 'PVE 拒绝此操作（HTTP 403）。请检查 Token 及所属用户的 PVE 权限。')
       }
       throw new PveError('pve_rejected', 'PVE 返回请求错误（HTTP ' + response.status + '）。',
         write && (response.status < 400 || response.status >= 500 || response.status === 408))

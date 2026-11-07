@@ -107,7 +107,7 @@ npm run deploy
 - 正常关机由 PVE 等待 60 秒。强制关机需要单独权限和 VMID 确认。提交后以 PVE 任务结果为准。
 - 操作记录优先显示未结束任务，总计最多 50 条。Cron 每分钟补查任务。遇到「结果未知」，管理员先在 PVE 核查，再在操作记录中填写核查结果并解除占用。
 - PVE 机器被移除后，执行一次成功同步以清除该 VMID 的旧授权。回收 VMID 时，在复用前完成这一步。更换整个 PVE 环境时使用新的 D1 数据库。
-- 连接异常时检查 Cloudflare Tunnel、VPC TLS 配置、PVE ACL 和 Workers Logs。应用日志记录错误分类，D1 审计记录用户变更及电源操作。
+- PVE 返回 401 时，检查 Secret 中的完整 Token ID 和最新密钥，以及用户和 Token 是否已过期。PVE 返回 403 时，使用 `pveum user token permissions pve-home@pve power` 核对有效权限。启用权限分离后，账号和 Token 均需授权。其他连接异常可检查 Tunnel、VPC TLS 配置和 Workers Logs。应用日志记录错误分类，D1 审计记录用户变更及电源操作。
 - Worker 发布异常可在 Cloudflare 控制台回滚到上一个版本。D1 迁移独立执行，回滚 Worker 时保留审计数据。
 
 ## API 约定
