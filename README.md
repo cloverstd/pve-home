@@ -98,7 +98,7 @@ npm run deploy
 
 发布凭据由 Workers Builds 注入。启用正式连接前，确认构建所选 API Token 有权绑定 VPC Service，以及为应用所在 Zone 配置 Worker 自定义域名。
 
-初始化 CI 时，只设置 Cloudflare 账号、D1 ID 和 `PVE_HOME_BOOTSTRAP=1`。这个模式发布 Worker 版本，且关闭自定义域名、`workers.dev`、预览 URL 和 Cron。准备好 GitHub Access 应用、VPC Service 和运行时 Secret 后，在 Builds 中移除 `PVE_HOME_BOOTSTRAP`，补全配置并重试生产构建。参考 [Workers Builds 配置](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)。
+初始化 CI 时，只设置 Cloudflare 账号、D1 ID 和 `PVE_HOME_BOOTSTRAP=1`。这个模式发布 Worker 版本，且关闭自定义域名、`workers.dev`、预览 URL 和 Cron。准备好 GitHub Access 应用、VPC Service 和运行时 Secret 后，在 Builds 中移除 `PVE_HOME_BOOTSTRAP` 并补全配置。首次替换初始化版本的运行时变量时，用同一组配置在终端运行 `npm run deploy`，核对并确认变更。之后推送 `main` 会继续由 Workers Builds 发布。参考 [Workers Builds 配置](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)。
 
 ### 5. 联调和日常操作
 
