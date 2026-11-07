@@ -95,6 +95,8 @@ npm run deploy
 
 在 **Build variables and secrets** 填写 `.env.deploy.example` 中的非秘密配置。PVE Token 在 Worker 的 **Variables and Secrets** 中单独添加为运行时 Secret `PVE_API_TOKEN`。数据库迁移在发布前通过 `npm run db:migrate` 执行。
 
+发布凭据由 Workers Builds 注入。启用正式连接前，确认构建所选 API Token 有权绑定 VPC Service，以及为应用所在 Zone 配置 Worker 自定义域名。
+
 初始化 CI 时，只设置 Cloudflare 账号、D1 ID 和 `PVE_HOME_BOOTSTRAP=1`。这个模式发布 Worker 版本，且关闭自定义域名、`workers.dev`、预览 URL 和 Cron。准备好 Google Access 应用、VPC Service 和运行时 Secret 后，在 Builds 中移除 `PVE_HOME_BOOTSTRAP`，补全配置并重试生产构建。参考 [Workers Builds 配置](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)。
 
 ### 5. 联调和日常操作
